@@ -117,7 +117,7 @@ var Height int32
 var Games int32
 var Names []string
 var URLs []string
-var displayServerUrl string
+var DisplayServerUrl string
 var Squads []string
 var Timeout int32
 var Sequential bool
@@ -140,7 +140,7 @@ func init() {
 	playCmd.Flags().Int32VarP(&Games, "games", "G", 1, "Number of Games Played")
 	playCmd.Flags().StringArrayVarP(&Names, "name", "n", nil, "Name of Snake")
 	playCmd.Flags().StringArrayVarP(&URLs, "url", "u", nil, "URL of Snake")
-	playCmd.Flags().StringVarP(&displayServerUrl, "dsurl", "D", "http://0.0.0.0:8080", "URL of Display Server")
+	playCmd.Flags().StringVarP(&DisplayServerUrl, "dsurl", "D", "", "URL of Display Server")
 	playCmd.Flags().StringArrayVarP(&Names, "squad", "S", nil, "Squad of Snake")
 	playCmd.Flags().Int32VarP(&Timeout, "timeout", "t", 500, "Request Timeout")
 	playCmd.Flags().BoolVarP(&Sequential, "sequential", "s", false, "Use Sequential Processing")
@@ -175,7 +175,7 @@ var run = func(cmd *cobra.Command, args []string) {
 
 	var games int
 	games = 0
-	log.Printf("%v", int(Games))
+	log.Printf("Game Runner ID: %v", GameRunnerId)
 	for i := int32(0); i < Games; i++ {
 		GameId = uuid.New().String()
 		Turn = 0
@@ -191,8 +191,6 @@ var run = func(cmd *cobra.Command, args []string) {
 			Battlesnakes[snake.ID] = snake
 		}
 
-
-		//todo call function to send state server
 		sendBoardState(state, outOfBounds, games, wins, draws)
 
 		for v := false; !v; v, _ = ruleset.IsGameOver(state) {
@@ -200,16 +198,13 @@ var run = func(cmd *cobra.Command, args []string) {
 			ruleset, royale = getRuleset(Seed, Turn, snakes)
 			state, outOfBounds = createNextBoardState(ruleset, royale, state, outOfBounds, snakes)
 			if ViewMap {
-
-				//todo call function to send state server
-				sendBoardState(state, outOfBounds, games, wins, draws)
-
-				//printMap(state, outOfBounds, Turn)
+				printMap(state, outOfBounds, Turn)
 			} else {
-				log.Printf("[%v]: State: %v OutOfBounds: %v\n", Turn, state, outOfBounds)
+				// log.Printf("[%v]: State: %v OutOfBounds: %v\n", Turn, state, outOfBounds)
 			}
-			sendEndRequest(ruleset, state, Battlesnakes[snake.ID])
 		}
+		sendEndRequest(ruleset, state, Battlesnakes[snake.ID])
+		sendBoardState(state, outOfBounds, games, wins, draws)
 
 		if GameType == "solo" {
 			// log.Printf("[DONE]: Game completed after %v turns.", Turn)
@@ -234,13 +229,13 @@ var run = func(cmd *cobra.Command, args []string) {
 		}
 		games++
 	}
+
 	log.Println("[DONE]:")
-	log.Printf("    Games completed: %v\n", games);
+	log.Printf("    Games completed: %v\n", games)
 	for _, snake := range state.Snakes {
 		log.Printf("    %v won: %v\n", Battlesnakes[snake.ID].Name, wins[Battlesnakes[snake.ID].Name])
 	}
-	log.Printf("    Draws: %v\n", draws);
-
+	log.Printf("    Draws: %v\n", draws)
 }
 
 func getRuleset(seed int64, gameTurn int32, snakes []Battlesnake) rules.Ruleset {
@@ -252,8 +247,8 @@ func getRuleset(seed int64, gameTurn int32, snakes []Battlesnake) rules.Ruleset 
 		MinimumFood:     1,
 	}
 
-	rs = RulesetResponse {
-		Name: GameType,
+	rs = RulesetResponse{
+		Name:    GameType,
 		Version: "v0",
 	}
 
@@ -437,8 +432,12 @@ func getIndividualBoardStateForSnake(state *rules.BoardState, snake Battlesnake,
 }
 
 func sendBoardState(state *rules.BoardState, outOfBounds []rules.Point, games int, wins map[string]int, draws int) {
+	if DisplayServerUrl == "" {
+		return
+	}
+
 	response := DisplayPayload{
-		Id: GameRunnerId,
+		Id:   GameRunnerId,
 		Game: GameResponse{Id: GameId, Ruleset: rs, Timeout: Timeout},
 		Turn: Turn,
 		Board: BoardResponse{
@@ -452,20 +451,19 @@ func sendBoardState(state *rules.BoardState, outOfBounds []rules.Point, games in
 			Draws: int32(draws),
 			Count: int32(games),
 			Total: Games,
-			Wins: winsFromWinsMap(wins),
+			Wins:  winsFromWinsMap(wins),
 		},
 	}
+
 	responseJson, err := json.Marshal(response)
 	if err != nil {
 		log.Panic("[PANIC]: Error Marshalling JSON from State")
 		panic(err)
 	}
-	// log.Println(string(responseJson))
 
-	u, _ := url.ParseRequestURI(displayServerUrl)
-	u.Path = path.Join(u.Path, "api", "GameRunner")
-	_, errr := HttpClient.Post(u.String(), "application/json", bytes.NewBuffer(responseJson))
-	if errr != nil {
+	u, _ := url.ParseRequestURI(DisplayServerUrl)
+	_, err = HttpClient.Post(u.String(), "application/json", bytes.NewBuffer(responseJson))
+	if err != nil {
 		log.Printf("[WARN]: Request to %v failed", u.String())
 	}
 }
