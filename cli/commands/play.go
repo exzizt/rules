@@ -170,11 +170,8 @@ var run = func(cmd *cobra.Command, args []string) {
 		wins[Battlesnakes[snake.ID].Name] = 0
 	}
 
-	var draws int
-	draws = 0
-
-	var games int
-	games = 0
+	var draws int = 0
+	var games int = 0
 	log.Printf("Game Runner ID: %v", GameRunnerId)
 	for i := int32(0); i < Games; i++ {
 		GameId = uuid.New().String()
@@ -258,8 +255,8 @@ func getRuleset(seed int64, gameTurn int32, snakes []Battlesnake) rules.Ruleset 
 			StandardRuleset:   standard,
 			Seed:              seed,
 			Turn:              gameTurn,
-			ShrinkEveryNTurns: 10,
-			DamagePerTurn:     1,
+			ShrinkEveryNTurns: 20,
+			DamagePerTurn:     15,
 		}
 		ruleset = &royale
 	case "squad":
