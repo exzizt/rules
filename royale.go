@@ -113,9 +113,10 @@ func (r *RoyaleRuleset) damageOutOfBounds(b *BoardState) error {
 					if snake.Health < 0 {
 						snake.Health = 0
 					}
-					if r.StandardRuleset.snakeIsOutOfHealth(snake) {
-						snake.EliminatedCause = EliminatedByOutOfHealth
-					}
+					// NOTE: This fixes a bug where snakes aren't given a chance to eat/survive in the Standard ruleset.
+					// if r.StandardRuleset.snakeIsOutOfHealth(snake) {
+					// 	snake.EliminatedCause = EliminatedByOutOfHealth
+					// }
 				}
 			}
 		}
