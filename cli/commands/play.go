@@ -54,14 +54,14 @@ type BoardResponse struct {
 	Snakes  []SnakeResponse `json:"snakes"`
 }
 
-type RulesetResponse struct {
+type GameResponseRuleset struct {
 	Name    string `json:"name"`
 	Version string `json:"version"`
 }
 
 type GameResponse struct {
 	Id      string          `json:"id"`
-	Ruleset RulesetResponse `json:"ruleset"`
+	Ruleset GameResponseRuleset `json:"ruleset"`
 	Timeout int32           `json:"timeout"`
 }
 
@@ -70,6 +70,20 @@ type ResponsePayload struct {
 	Turn  int32         `json:"turn"`
 	Board BoardResponse `json:"board"`
 	You   SnakeResponse `json:"you"`
+}
+
+type PlayerResponse struct {
+	Move  string `json:"move"`
+	Shout string `json:"shout"`
+}
+
+type PingResponse struct {
+	APIVersion string `json:"apiversion"`
+	Author     string `json:"author"`
+	Color      string `json:"color"`
+	Head       string `json:"head"`
+	Tail       string `json:"tail"`
+	Version    string `json:"version"`
 }
 
 type WinResponse struct {
@@ -92,23 +106,8 @@ type DisplayPayload struct {
 	Stats StatsResponse `json:"stats"`
 }
 
-type PlayerResponse struct {
-	Move  string `json:"move"`
-	Shout string `json:"shout"`
-}
-
-type PingResponse struct {
-	APIVersion string `json:"apiversion"`
-	Author     string `json:"author"`
-	Color      string `json:"color"`
-	Head       string `json:"head"`
-	Tail       string `json:"tail"`
-	Version    string `json:"version"`
-}
-
 var GameRunnerId string
 var GameId string
-var rs RulesetResponse
 var Turn int32
 var Battlesnakes map[string]Battlesnake
 var HttpClient http.Client
@@ -123,6 +122,7 @@ var Timeout int32
 var Sequential bool
 var GameType string
 var ViewMap bool
+var Logging bool
 var Seed int64
 
 var playCmd = &cobra.Command{
@@ -138,14 +138,15 @@ func init() {
 	playCmd.Flags().Int32VarP(&Width, "width", "W", 11, "Width of Board")
 	playCmd.Flags().Int32VarP(&Height, "height", "H", 11, "Height of Board")
 	playCmd.Flags().Int32VarP(&Games, "games", "G", 1, "Number of Games Played")
+	playCmd.Flags().StringVarP(&DisplayServerUrl, "dsurl", "D", "", "URL of Display Server")
 	playCmd.Flags().StringArrayVarP(&Names, "name", "n", nil, "Name of Snake")
 	playCmd.Flags().StringArrayVarP(&URLs, "url", "u", nil, "URL of Snake")
-	playCmd.Flags().StringVarP(&DisplayServerUrl, "dsurl", "D", "", "URL of Display Server")
 	playCmd.Flags().StringArrayVarP(&Names, "squad", "S", nil, "Squad of Snake")
 	playCmd.Flags().Int32VarP(&Timeout, "timeout", "t", 500, "Request Timeout")
 	playCmd.Flags().BoolVarP(&Sequential, "sequential", "s", false, "Use Sequential Processing")
 	playCmd.Flags().StringVarP(&GameType, "gametype", "g", "standard", "Type of Game Rules")
 	playCmd.Flags().BoolVarP(&ViewMap, "viewmap", "v", false, "View the Map Each Turn")
+	playCmd.Flags().BoolVarP(&Logging, "logging", "l", false, "Show Logs")
 	playCmd.Flags().Int64VarP(&Seed, "seed", "r", time.Now().UTC().UnixNano(), "Random Seed")
 }
 
@@ -153,58 +154,52 @@ var run = func(cmd *cobra.Command, args []string) {
 	rand.Seed(Seed)
 
 	Battlesnakes = make(map[string]Battlesnake)
+	
 	GameRunnerId = uuid.New().String()
 
-	snakes := buildSnakesFromOptions()
-
-	var ruleset rules.Ruleset
-	ruleset, _ = getRuleset(Seed, Turn, snakes)
-	state := initializeBoardFromArgs(ruleset, snakes)
-	for _, snake := range snakes {
-		Battlesnakes[snake.ID] = snake
-	}
-
-	var wins map[string]int
-	wins = make(map[string]int)
-	for _, snake := range state.Snakes {
-		wins[Battlesnakes[snake.ID].Name] = 0
-	}
-
-	var draws int = 0
 	var games int = 0
+	var draws int = 0
+	
+	var wins map[string]int = make(map[string]int)
+	for _, snake := range Battlesnakes {
+		wins[snake.Name] = 0
+	}
+
 	log.Printf("Game Runner ID: %v", GameRunnerId)
-	for i := int32(0); i < Games; i++ {
+	for i := int32(1); i <= Games; i++ {
 		GameId = uuid.New().String()
 		Turn = 0
 
 		snakes := buildSnakesFromOptions()
 
 		var ruleset rules.Ruleset
-		var royale rules.RoyaleRuleset
 		var outOfBounds []rules.Point
-		ruleset, _ = getRuleset(Seed, Turn, snakes)
+		ruleset = getRuleset(Seed, Turn, snakes)
 		state := initializeBoardFromArgs(ruleset, snakes)
 		for _, snake := range snakes {
 			Battlesnakes[snake.ID] = snake
 		}
 
-		sendBoardState(state, outOfBounds, games, wins, draws)
+		sendBoardState(ruleset, state, outOfBounds, games, wins, draws)
 
 		for v := false; !v; v, _ = ruleset.IsGameOver(state) {
 			Turn++
-			ruleset, royale = getRuleset(Seed, Turn, snakes)
-			state, outOfBounds = createNextBoardState(ruleset, royale, state, outOfBounds, snakes)
+			ruleset = getRuleset(Seed, Turn, snakes)
+			state = createNextBoardState(ruleset, state, outOfBounds, snakes)
 			if ViewMap {
 				printMap(state, outOfBounds, Turn)
-			} else {
-				// log.Printf("[%v]: State: %v OutOfBounds: %v\n", Turn, state, outOfBounds)
 			}
+			if Logging {
+				log.Printf("[%v]: State: %v OutOfBounds: %v\n", Turn, state, outOfBounds)
+			}
+
+			sendBoardState(ruleset, state, outOfBounds, games, wins, draws)
 		}
-		sendEndRequest(ruleset, state, Battlesnakes[snake.ID])
-		sendBoardState(state, outOfBounds, games, wins, draws)
 
 		if GameType == "solo" {
-			// log.Printf("[DONE]: Game completed after %v turns.", Turn)
+			if Logging {
+				log.Printf("[DONE]: Game completed after %v turns.", Turn)
+			}
 		} else {
 			var winner string
 			isDraw := true
@@ -212,27 +207,41 @@ var run = func(cmd *cobra.Command, args []string) {
 				if snake.EliminatedCause == rules.NotEliminated {
 					isDraw = false
 					winner = Battlesnakes[snake.ID].Name
-					sendEndRequest(state, Battlesnakes[snake.ID])
 				}
+				sendEndRequest(ruleset, state, Battlesnakes[snake.ID])
 			}
 
 			if isDraw {
-				// log.Printf("[DONE]: Game completed after %v turns. It was a draw.", Turn)
+				if Logging {
+					log.Printf("[DONE]: Game completed after %v turns. It was a draw.", Turn)
+				}
+				// TODO: Capture draws only for snakes alive at the end of the game.
 				draws++
 			} else {
-				// log.Printf("[DONE]: Game completed after %v turns. %v is the winner.", Turn, winner)
+				if Logging {
+					log.Printf("[DONE]: Game completed after %v turns. %v is the winner.", Turn, winner)
+				}
 				wins[winner]++
 			}
 		}
+
+		if ViewMap {
+			printMap(state, outOfBounds, Turn)
+		}
+
+		sendBoardState(ruleset, state, outOfBounds, games, wins, draws)
+
 		games++
 	}
 
-	log.Println("[DONE]:")
-	log.Printf("    Games completed: %v\n", games)
-	for _, snake := range state.Snakes {
-		log.Printf("    %v won: %v\n", Battlesnakes[snake.ID].Name, wins[Battlesnakes[snake.ID].Name])
+	if Logging {
+		log.Println("[DONE]:")
+		log.Printf("    Games completed: %v\n", games)
+		for _, snake := range Battlesnakes {
+			log.Printf("    %v won: %v\n", snake.Name, wins[snake.Name])
+		}
+		log.Printf("    Draws: %v\n", draws)
 	}
-	log.Printf("    Draws: %v\n", draws)
 }
 
 func getRuleset(seed int64, gameTurn int32, snakes []Battlesnake) rules.Ruleset {
@@ -242,11 +251,6 @@ func getRuleset(seed int64, gameTurn int32, snakes []Battlesnake) rules.Ruleset 
 	standard := rules.StandardRuleset{
 		FoodSpawnChance: 15,
 		MinimumFood:     1,
-	}
-
-	rs = RulesetResponse{
-		Name:    GameType,
-		Version: "v0",
 	}
 
 	switch GameType {
@@ -409,7 +413,10 @@ func getIndividualBoardStateForSnake(state *rules.BoardState, snake Battlesnake,
 		}
 	}
 	response := ResponsePayload{
-		Game: GameResponse{Id: GameId, Ruleset: rs, Timeout: Timeout},
+		Game: GameResponse{Id: GameId, Timeout: Timeout, Ruleset: GameResponseRuleset{
+			Name:    ruleset.Name(),
+			Version: "cli", // TODO: Use GitHub Release Version
+		}},
 		Turn: Turn,
 		Board: BoardResponse{
 			Height:  state.Height,
@@ -428,14 +435,17 @@ func getIndividualBoardStateForSnake(state *rules.BoardState, snake Battlesnake,
 	return responseJson
 }
 
-func sendBoardState(state *rules.BoardState, outOfBounds []rules.Point, games int, wins map[string]int, draws int) {
+func sendBoardState(ruleset rules.Ruleset, state *rules.BoardState, outOfBounds []rules.Point, games int, wins map[string]int, draws int) {
 	if DisplayServerUrl == "" {
 		return
 	}
 
 	response := DisplayPayload{
 		Id:   GameRunnerId,
-		Game: GameResponse{Id: GameId, Ruleset: rs, Timeout: Timeout},
+		Game: GameResponse{Id: GameId, Timeout: Timeout, Ruleset: GameResponseRuleset{
+			Name:    ruleset.Name(),
+			Version: "cli", // TODO: Use GitHub Release Version
+		}},
 		Turn: Turn,
 		Board: BoardResponse{
 			Height:  state.Height,
